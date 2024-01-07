@@ -15,6 +15,7 @@ import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.math.random.Random;
 import net.minecraft.world.BlockRenderView;
+import net.minecraftforge.client.model.data.ModelData;
 
 import java.util.function.Function;
 
@@ -43,8 +44,8 @@ public class WorldMesherRenderContext extends AbstractBlockRenderContext {
             blockInfo.recomputeSeed = true;
 
             aoCalc.clear();
-            blockInfo.prepareForBlock(blockState, blockPos, model.useAmbientOcclusion());
-            model.emitBlockQuads(blockInfo.blockView, blockInfo.blockState, blockInfo.blockPos, blockInfo.randomSupplier, this);
+            blockInfo.prepareForBlock(blockState, blockPos, model.useAmbientOcclusion(), ModelData.builder().build(), RenderLayer.getTranslucentMovingBlock());
+          //  model.applyTransform(blockInfo.blockView, blockInfo.blockState, blockInfo.blockPos, blockInfo.randomSupplier, this);
         } catch (Throwable throwable) {
             CrashReport crashReport = CrashReport.create(throwable, "Tessellating block in WorldMesher mesh");
             CrashReportSection crashReportSection = crashReport.addElement("Block being tessellated");

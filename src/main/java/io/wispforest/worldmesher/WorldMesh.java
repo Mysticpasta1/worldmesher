@@ -364,7 +364,7 @@ public class WorldMesh {
             var blockLayer = RenderLayers.getBlockLayer(state);
 
             final var model = blockRenderManager.getModel(state);
-            if (renderContext != null && !model.isVanillaAdapter()) {
+            if (renderContext != null && !model.isBuiltin()) {
                 renderContext.tessellateBlock(this.world, state, pos, model, matrices);
             } else if (state.getRenderType() == BlockRenderType.MODEL) {
                 blockRenderer.render(this.world, model, state, pos, matrices, this.getOrCreateBuilder(builderStorage, blockLayer), cull, random, state.getRenderingSeed(pos), OverlayTexture.DEFAULT_UV);

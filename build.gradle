@@ -43,42 +43,19 @@ loom {
 }
 
 repositories {
-    // Add repositories to retrieve artifacts from in here.
-    // You should only use this when depending on other mods because
-    // Loom adds the essential maven repositories to download Minecraft and libraries from automatically.
-    // See https://docs.gradle.org/current/userguide/declaring_repositories.html
-    // for more information about repositories.
+    maven {
+        url "https://maven.su5ed.dev/releases"
+    }
 }
 
 dependencies {
     // to change the versions see the gradle.properties file
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
-
-    // choose what mappings you want to use here
-    // leave this uncommented if you want to use
-    // mojang's official mappings, or feel free
-    // to add your own mappings here (how about
-    // mojmap layered with parchment, for example?)
-
-    // uncomment this if you want to use yarn mappings
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
-
-    // your forge dependency, this is **required** when using Forge Loom in forge mode!
     forge "net.minecraftforge:forge:${project.forge_version}"
 
-    // additional dependencies can be specified using loom's regular format
-    // specifying a "mod" dependency (like modImplementation or modApi)
-    // will cause loom to remap the file to your specified mappings
-
-    // in this example, we'll be adding JEI as a dependency
-    // according to their developer example on GitHub
-    // see: https://github.com/mezz/JustEnoughItems/wiki/Getting-Started
-    // compile against the JEI API but do not include it at runtime
-    // don't worry about loom "not finding a forge mod" here,
-    // JEI's api just doesn't have any class with an @Mod annotation
-    // modCompileOnly "mezz.jei:jei-1.20.1:${jei_version}:api"
-    // at runtime, use the full JEI jar
-    // modRuntimeOnly "mezz.jei:jei-1.20.1:${jei_version}"
+    modCompileOnly "dev.su5ed.sinytra.fabric-api:fabric-api:0.91.0+1.10.4+1.20.1"
+    modRuntimeOnly ("dev.su5ed.sinytra.fabric-api:fabric-api:0.91.0+1.10.4+1.20.1")
 }
 
 processResources {
