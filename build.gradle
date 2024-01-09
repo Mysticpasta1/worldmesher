@@ -19,8 +19,6 @@ loom {
     // and want loom to stop warning you about their license
     silentMojangMappingsLicense()
 
-    accessWidenerPath = file("src/main/resources/worldmesher.accesswidener")
-
     // since loom 0.10, you are **required** to use the
     // "forge" block to configure forge-specific features,
     // such as the mixinConfigs array or datagen
@@ -34,7 +32,7 @@ loom {
         // missing access transformers?
         // don't worry, you can still use them!
         // note that your AT *MUST* be located at
-        // src/main/resources/META-INF/accesstransformer.cfg
+        accessTransformer("src/main/resources/META-INF/accesstransformer.cfg")
         // to work as there is currently no config option to change this.
         // also, any names used in your access transformer will need to be
         // in SRG mapped ("func_" / "field_" with MCP class names) to work!
