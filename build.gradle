@@ -52,13 +52,15 @@ dependencies {
     mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
     forge "net.minecraftforge:forge:${project.forge_version}"
 
-    modCompileOnly "dev.su5ed.sinytra.fabric-api:fabric-api:0.91.0+1.10.4+1.20.1"
+    modCompileOnly ("dev.su5ed.sinytra.fabric-api:fabric-api:0.91.0+1.10.4+1.20.1")
     modRuntimeOnly ("dev.su5ed.sinytra.fabric-api:fabric-api:0.91.0+1.10.4+1.20.1")
+
 }
 
 processResources {
     // define properties that can be used during resource processing
     inputs.property "version", project.version
+    inputs.property("fabric_api_version", project.fabric_version)
 
     // this will replace the property "${version}" in your mods.toml
     // with the version you've defined in your gradle.properties

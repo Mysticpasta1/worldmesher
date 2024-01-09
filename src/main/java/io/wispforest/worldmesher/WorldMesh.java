@@ -8,14 +8,15 @@ import io.wispforest.worldmesher.mixin.GlAllocationUtilsAccessor;
 import io.wispforest.worldmesher.renderers.WorldMesherBlockModelRenderer;
 import io.wispforest.worldmesher.renderers.WorldMesherFluidRenderer;
 import net.fabricmc.fabric.api.renderer.v1.RendererAccess;
+import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel;
 import net.fabricmc.fabric.impl.client.indigo.renderer.IndigoRenderer;
-import net.fabricmc.fabric.impl.client.indigo.renderer.render.WorldMesherRenderContext;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.BlockRenderType;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gl.VertexBuffer;
 import net.minecraft.client.render.*;
+import net.minecraft.client.render.model.BakedModel;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
@@ -363,11 +364,11 @@ public class WorldMesh {
 
             var blockLayer = RenderLayers.getBlockLayer(state);
 
-            final var model = blockRenderManager.getModel(state);
-            if (renderContext != null && !model.isBuiltin()) {
+            final var model = (FabricBakedModel) blockRenderManager.getModel(state);
+            if (renderContext != null && !model.isVanillaAdapter()) {
                 renderContext.tessellateBlock(this.world, state, pos, model, matrices);
             } else if (state.getRenderType() == BlockRenderType.MODEL) {
-                blockRenderer.render(this.world, model, state, pos, matrices, this.getOrCreateBuilder(builderStorage, blockLayer), cull, random, state.getRenderingSeed(pos), OverlayTexture.DEFAULT_UV);
+                blockRenderer.render(this.world, (BakedModel) model, state, pos, matrices, this.getOrCreateBuilder(builderStorage, blockLayer), cull, random, state.getRenderingSeed(pos), OverlayTexture.DEFAULT_UV);
             }
 
             matrices.pop();

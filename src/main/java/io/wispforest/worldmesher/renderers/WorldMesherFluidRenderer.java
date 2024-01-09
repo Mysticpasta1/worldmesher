@@ -54,7 +54,7 @@ public class WorldMesherFluidRenderer extends FluidRenderer {
         BlockState blockState7 = world.getBlockState(pos.offset(Direction.EAST));
         FluidState fluidState7 = blockState7.getFluidState();
         boolean bl2 = !isSameFluid(fluidState, fluidState3);
-        boolean bl3 = shouldRenderSide(world, pos, fluidState, blockState, Direction.DOWN, fluidState2) && !isSideCovered(world, pos, Direction.DOWN, 0.8888889F, blockState2);
+        boolean bl3 = shouldRenderSide(world, pos, fluidState, blockState, Direction.DOWN, fluidState2) && !isSideCovered(world, Direction.DOWN, 0.8888889F, pos, blockState2);
         boolean bl4 = shouldRenderSide(world, pos, fluidState, blockState, Direction.NORTH, fluidState4);
         boolean bl5 = shouldRenderSide(world, pos, fluidState, blockState, Direction.SOUTH, fluidState5);
         boolean bl6 = shouldRenderSide(world, pos, fluidState, blockState, Direction.WEST, fluidState6);
@@ -99,7 +99,7 @@ public class WorldMesherFluidRenderer extends FluidRenderer {
             float ac;
             float ae;
             float ag;
-            if (bl2 && !isSideCovered(world, pos, Direction.UP, Math.min(Math.min(p, r), Math.min(q, o)), blockState3)) {
+            if (bl2 && !isSideCovered(world, Direction.UP, Math.min(Math.min(p, r), Math.min(q, o)), pos, blockState3)) {
                 p -= 0.001F;
                 r -= 0.001F;
                 q -= 0.001F;
@@ -232,7 +232,7 @@ public class WorldMesherFluidRenderer extends FluidRenderer {
                                 bl8 = bl7;
                         }
                     } while(!bl8);
-                } while(isSideCovered(world, pos, direction, Math.max(af, aa), world.getBlockState(pos.offset(direction))));
+                } while(isSideCovered(world, direction, Math.max(af, aa), pos, world.getBlockState(pos.offset(direction))));
 
                 BlockPos blockPos = pos.offset(direction);
                 Sprite sprite2 = sprites[1];

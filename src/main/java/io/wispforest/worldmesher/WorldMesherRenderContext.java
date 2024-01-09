@@ -1,19 +1,20 @@
-package net.fabricmc.fabric.impl.client.indigo.renderer.render;
+package io.wispforest.worldmesher;
 
+import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel;
 import net.fabricmc.fabric.impl.client.indigo.renderer.aocalc.AoCalculator;
 import net.fabricmc.fabric.impl.client.indigo.renderer.aocalc.AoLuminanceFix;
+import net.fabricmc.fabric.impl.client.indigo.renderer.render.AbstractBlockRenderContext;
+import net.fabricmc.fabric.impl.client.indigo.renderer.render.BlockRenderInfo;
 import net.minecraft.block.BlockState;
 import net.minecraft.client.render.RenderLayer;
 import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.WorldRenderer;
-import net.minecraft.client.render.model.BakedModel;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.util.crash.CrashException;
 import net.minecraft.util.crash.CrashReport;
 import net.minecraft.util.crash.CrashReportSection;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.math.random.Random;
 import net.minecraft.world.BlockRenderView;
 import net.minecraftforge.client.model.data.ModelData;
 
@@ -30,10 +31,9 @@ public class WorldMesherRenderContext extends AbstractBlockRenderContext {
         this.bufferFunc = bufferFunc;
 
         this.blockInfo.prepareForWorld(blockView, true);
-        this.blockInfo.random = Random.create();
     }
 
-    public void tessellateBlock(BlockRenderView blockView, BlockState blockState, BlockPos blockPos, final BakedModel model, MatrixStack matrixStack) {
+    public void tessellateBlock(BlockRenderView blockView, BlockState blockState, BlockPos blockPos, final FabricBakedModel model, MatrixStack matrixStack) {
         try {
             Vec3d vec3d = blockState.getModelOffset(blockView, blockPos);
             matrixStack.translate(vec3d.x, vec3d.y, vec3d.z);
@@ -41,11 +41,9 @@ public class WorldMesherRenderContext extends AbstractBlockRenderContext {
             this.matrix = matrixStack.peek().getPositionMatrix();
             this.normalMatrix = matrixStack.peek().getNormalMatrix();
 
-            blockInfo.recomputeSeed = true;
-
             aoCalc.clear();
-            blockInfo.prepareForBlock(blockState, blockPos, model.useAmbientOcclusion(), ModelData.builder().build(), RenderLayer.getTranslucentMovingBlock());
-          //  model.applyTransform(blockInfo.blockView, blockInfo.blockState, blockInfo.blockPos, blockInfo.randomSupplier, this);
+            blockInfo.prepareForBlock(blockState, blockPos, model.isVanillaAdapter(), ModelData.builder().build(), RenderLayer.getTranslucentMovingBlock());
+            model.emitBlockQuads(blockInfo.blockView, blockInfo.blockState, blockInfo.blockPos, blockInfo.randomSupplier, this);
         } catch (Throwable throwable) {
             CrashReport crashReport = CrashReport.create(throwable, "Tessellating block in WorldMesher mesh");
             CrashReportSection crashReportSection = crashReport.addElement("Block being tessellated");
