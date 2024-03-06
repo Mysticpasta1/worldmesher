@@ -1,4 +1,4 @@
-package net.fabricmc.fabric.impl.client.indigo.renderer.render;
+package io.wispforest.worldmesher;
 
 import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel;
 import net.fabricmc.fabric.impl.client.indigo.renderer.aocalc.AoCalculator;
