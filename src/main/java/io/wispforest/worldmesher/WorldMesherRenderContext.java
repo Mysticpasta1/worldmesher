@@ -1,74 +1,68 @@
 package io.wispforest.worldmesher;
 
-import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel;
-import net.fabricmc.fabric.impl.client.indigo.renderer.aocalc.AoCalculator;
-import net.fabricmc.fabric.impl.client.indigo.renderer.aocalc.AoLuminanceFix;
-import net.fabricmc.fabric.impl.client.indigo.renderer.render.AbstractBlockRenderContext;
-import net.fabricmc.fabric.impl.client.indigo.renderer.render.BlockRenderInfo;
-import net.minecraft.block.BlockState;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.WorldRenderer;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.crash.CrashException;
-import net.minecraft.util.crash.CrashReport;
-import net.minecraft.util.crash.CrashReportSection;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.world.BlockRenderView;
-import net.minecraftforge.client.model.data.ModelData;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.block.model.BakedQuad;
+import net.minecraft.client.resources.model.BakedModel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.world.level.block.state.BlockState;
+import net.neoforged.neoforge.client.model.data.ModelData;
 
+import java.util.List;
 import java.util.function.Function;
 
-@SuppressWarnings("UnstableApiUsage")
-public class WorldMesherRenderContext extends AbstractBlockRenderContext {
+public record WorldMesherRenderContext(BlockAndTintGetter level, Function<RenderType, VertexConsumer> buffers) {
 
-    private final BlockRenderView blockView;
-    private final Function<RenderLayer, VertexConsumer> bufferFunc;
+    private static final float[] BRIGHTNESS = {1f, 1f, 1f, 1f};
 
-    public WorldMesherRenderContext(BlockRenderView blockView, Function<RenderLayer, VertexConsumer> bufferFunc) {
-        this.blockView = blockView;
-        this.bufferFunc = bufferFunc;
+    public void renderBlock(
+            BlockPos pos,
+            BlockState state,
+            BakedModel model,
+            PoseStack pose,
+            RandomSource random,
+            ModelData modelData
+    ) {
+        var types = model.getRenderTypes(state, random, modelData);
 
-        this.blockInfo.prepareForWorld(blockView, true);
-    }
+        for (RenderType type : types) {
+            VertexConsumer consumer = buffers.apply(type);
 
-    public void tessellateBlock(BlockRenderView blockView, BlockState blockState, BlockPos blockPos, final FabricBakedModel model, MatrixStack matrixStack) {
-        try {
-            Vec3d vec3d = blockState.getModelOffset(blockView, blockPos);
-            matrixStack.translate(vec3d.x, vec3d.y, vec3d.z);
+            for (var dir : Direction.values()) {
+                random.setSeed(state.getSeed(pos));
+                List<BakedQuad> quads = model.getQuads(state, dir, random, modelData, type);
 
-            this.matrix = matrixStack.peek().getPositionMatrix();
-            this.normalMatrix = matrixStack.peek().getNormalMatrix();
+                for (BakedQuad quad : quads) {
+                    writeQuad(consumer, pose.last(), quad);
+                }
+            }
 
-            aoCalc.clear();
-            blockInfo.prepareForBlock(blockState, blockPos, model.isVanillaAdapter(), ModelData.builder().build(), RenderLayer.getTranslucentMovingBlock());
-            model.emitBlockQuads(blockInfo.blockView, blockInfo.blockState, blockInfo.blockPos, blockInfo.randomSupplier, this);
-        } catch (Throwable throwable) {
-            CrashReport crashReport = CrashReport.create(throwable, "Tessellating block in WorldMesher mesh");
-            CrashReportSection crashReportSection = crashReport.addElement("Block being tessellated");
-            CrashReportSection.addBlockInfo(crashReportSection, blockView, blockPos, blockState);
-            throw new CrashException(crashReport);
+            random.setSeed(state.getSeed(pos));
+            List<BakedQuad> general = model.getQuads(state, null, random, modelData, type);
+
+            for (BakedQuad quad : general) {
+                writeQuad(consumer, pose.last(), quad);
+            }
         }
     }
 
-    @Override
-    protected AoCalculator createAoCalc(BlockRenderInfo blockInfo) {
-        return new AoCalculator(blockInfo) {
-            @Override
-            public int light(BlockPos pos, BlockState state) {
-                return WorldRenderer.getLightmapCoordinates(WorldMesherRenderContext.this.blockView, state, pos);
-            }
+    private void writeQuad(VertexConsumer vc, PoseStack.Pose pose, BakedQuad quad) {
+        int light = 0x00F000F0; // full brightness; you can replace with real lighting
 
-            @Override
-            public float ao(BlockPos pos, BlockState state) {
-                return AoLuminanceFix.INSTANCE.apply(WorldMesherRenderContext.this.blockView, pos, state);
-            }
-        };
-    }
+        int[] lights = {light, light, light, light};
 
-    @Override
-    protected VertexConsumer getVertexConsumer(RenderLayer layer) {
-        return this.bufferFunc.apply(layer);
+        vc.putBulkData(
+                pose,
+                quad,
+                BRIGHTNESS,
+                1f, 1f, 1f, 1f,
+                lights,
+                0,
+                false
+        );
     }
 }

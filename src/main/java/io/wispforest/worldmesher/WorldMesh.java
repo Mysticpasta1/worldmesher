@@ -2,42 +2,41 @@ package io.wispforest.worldmesher;
 
 import com.google.common.collect.HashMultimap;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.systems.VertexSorter;
-import io.wispforest.worldmesher.mixin.BufferBuilderAccessor;
-import io.wispforest.worldmesher.mixin.GlAllocationUtilsAccessor;
+import com.mojang.blaze3d.vertex.*;
 import io.wispforest.worldmesher.renderers.WorldMesherBlockModelRenderer;
 import io.wispforest.worldmesher.renderers.WorldMesherFluidRenderer;
-import net.fabricmc.fabric.api.renderer.v1.RendererAccess;
-import net.fabricmc.fabric.api.renderer.v1.model.FabricBakedModel;
-import net.fabricmc.fabric.impl.client.indigo.renderer.IndigoRenderer;
-import net.fabricmc.loader.api.FabricLoader;
-import net.minecraft.block.BlockRenderType;
-import net.minecraft.block.entity.BlockEntity;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gl.VertexBuffer;
-import net.minecraft.client.render.*;
-import net.minecraft.client.render.model.BakedModel;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.Util;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Box;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.Vec3d;
-import net.minecraft.util.math.random.Random;
-import net.minecraft.world.BlockRenderView;
-import net.minecraft.world.World;
+import net.minecraft.Util;
+import net.minecraft.client.Camera;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.*;
+import net.minecraft.client.renderer.block.BlockRenderDispatcher;
+import net.minecraft.client.renderer.block.model.BakedQuad;
+import net.minecraft.client.renderer.entity.layers.RenderLayer;
+import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.client.resources.model.BakedModel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
+import net.neoforged.neoforge.client.model.data.ModelData;
 import org.apache.commons.lang3.function.TriFunction;
 import org.jetbrains.annotations.Nullable;
 import org.joml.Matrix4f;
+import org.joml.Vector3d;
 import org.lwjgl.system.MemoryUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Function;
@@ -47,10 +46,10 @@ public class WorldMesh {
     private static final Logger LOGGER = LoggerFactory.getLogger(WorldMesh.class);
 
     // Render setup data
-    private final BlockRenderView world;
+    private final BlockAndTintGetter world;
     private final BlockPos origin;
     private final BlockPos end;
-    private final Box dimensions;
+    private final AABB dimensions;
 
     private final boolean cull;
     private final boolean useGlobalNeighbors;
@@ -58,7 +57,7 @@ public class WorldMesh {
     private final Runnable renderStartAction;
     private final Runnable renderEndAction;
 
-    private final TriFunction<PlayerEntity, BlockPos, BlockPos, List<Entity>> entitySupplier;
+    private final TriFunction<Player, BlockPos, BlockPos, List<Entity>> entitySupplier;
     private DynamicRenderInfo renderInfo = DynamicRenderInfo.EMPTY;
     private boolean entitiesFrozen;
     private boolean freezeEntities;
@@ -70,9 +69,9 @@ public class WorldMesh {
     private @Nullable CompletableFuture<Void> buildFuture = null;
 
     // Vertex storage
-    private final Map<RenderLayer, VertexBuffer> bufferStorage = new HashMap<>();
+    private final Map<RenderType, VertexBuffer> bufferStorage = new HashMap<>();
 
-    private WorldMesh(BlockRenderView world, BlockPos origin, BlockPos end, boolean cull, boolean useGlobalNeighbors, boolean freezeEntities, Runnable renderStartAction, Runnable renderEndAction, TriFunction<PlayerEntity, BlockPos, BlockPos, List<Entity>> entitySupplier) {
+    private WorldMesh(BlockAndTintGetter world, BlockPos origin, BlockPos end, boolean cull, boolean useGlobalNeighbors, boolean freezeEntities, Runnable renderStartAction, Runnable renderEndAction, TriFunction<Player, BlockPos, BlockPos, List<Entity>> entitySupplier) {
         this.world = world;
         this.origin = origin;
         this.end = end;
@@ -80,7 +79,7 @@ public class WorldMesh {
         this.cull = cull;
         this.useGlobalNeighbors = useGlobalNeighbors;
         this.freezeEntities = freezeEntities;
-        this.dimensions = new Box(this.origin, this.end);
+        this.dimensions = new AABB(new Vec3(this.origin.getX(), this.origin.getY(), this.origin.getZ()), new Vec3(this.end.getX(), this.end.getY(), this.end.getZ()));
         this.entitySupplier = entitySupplier;
 
         this.renderStartAction = renderStartAction;
@@ -94,13 +93,13 @@ public class WorldMesh {
      *
      * @param matrices The translation matrices. This is applied to the entire mesh
      */
-    public void render(MatrixStack matrices) {
+    public void render(PoseStack matrices) {
         if (!this.canRender()) {
             throw new IllegalStateException("World mesh not prepared!");
         }
 
-        var matrix = matrices.peek().getPositionMatrix();
-        var translucent = RenderLayer.getTranslucent();
+        var matrix = matrices.last().pose();
+        var translucent = RenderType.translucent();
 
         this.bufferStorage.forEach((renderLayer, vertexBuffer) -> {
             if (renderLayer == translucent) return;
@@ -114,15 +113,22 @@ public class WorldMesh {
         VertexBuffer.unbind();
     }
 
-    private void drawBuffer(VertexBuffer vertexBuffer, RenderLayer renderLayer, Matrix4f matrix) {
-        renderLayer.startDrawing();
-        renderStartAction.run();
+    private void drawBuffer(VertexBuffer vertexBuffer, RenderStateShard renderLayer, Matrix4f modelMatrix) {
+        renderLayer.setupRenderState();
+        this.renderStartAction.run();
+
+        ShaderInstance shader = RenderSystem.getShader();
+        if (shader != null) {
+            shader.MODEL_VIEW_MATRIX.set(modelMatrix);
+            shader.PROJECTION_MATRIX.set(RenderSystem.getProjectionMatrix());
+            shader.apply();
+        }
 
         vertexBuffer.bind();
-        vertexBuffer.draw(matrix, RenderSystem.getProjectionMatrix(), RenderSystem.getShader());
+        vertexBuffer.draw();
 
-        renderEndAction.run();
-        renderLayer.endDrawing();
+        this.renderEndAction.run();
+        renderLayer.clearRenderState();
     }
 
     /**
@@ -208,7 +214,7 @@ public class WorldMesh {
     /**
      * @return The dimensions of this mesh's entire area
      */
-    public Box dimensions() {
+    public AABB dimensions() {
         return dimensions;
     }
 
@@ -236,7 +242,7 @@ public class WorldMesh {
      * the main worker executor
      */
     public synchronized void scheduleRebuild() {
-        this.scheduleRebuild(Util.getMainWorkerExecutor());
+        this.scheduleRebuild(Util.backgroundExecutor());
     }
 
     /**
@@ -269,118 +275,85 @@ public class WorldMesh {
     }
 
     private void build() {
-        var client = MinecraftClient.getInstance();
-        var blockRenderManager = client.getBlockRenderManager();
+        var client = Minecraft.getInstance();
+        var blockRenderManager = client.getBlockRenderer();
 
         var blockRenderer = new WorldMesherBlockModelRenderer();
-        var fluidRenderer = new WorldMesherFluidRenderer();
 
-        var matrices = new MatrixStack();
-        var builderStorage = new HashMap<RenderLayer, BufferBuilder>();
-        var random = Random.createLocal();
-
-        WorldMesherRenderContext renderContext = null;
-        try {
-            //noinspection UnstableApiUsage
-            renderContext = RendererAccess.INSTANCE.getRenderer() instanceof IndigoRenderer
-                    ? new WorldMesherRenderContext(this.world, layer -> this.getOrCreateBuilder(builderStorage, layer))
-                    : null;
-        } catch (Throwable throwable) {
-            var fabricApiVersion = FabricLoader.getInstance().getModContainer("worldmesher").get().getMetadata().getCustomValue("worldmesher:fabric_api_build_version").getAsString();
-            LOGGER.error(
-                    "Could not create a context for rendering Fabric API models. This is most likely due to an incompatible Fabric API version - this build of WorldMesher was compiled against '{}', try that instead",
-                    fabricApiVersion,
-                    throwable
-            );
-        }
+        var matrices = new PoseStack();
+        var builderStorage = new HashMap<RenderType, BufferBuilder>();
 
         this.entitiesFrozen = this.freezeEntities;
         var entitiesFuture = new CompletableFuture<List<DynamicRenderInfo.EntityEntry>>();
-        client.execute(() -> {
-            entitiesFuture.complete(this.entitySupplier.apply(client.player, this.origin, this.end.add(1, 1, 1))
-                    .stream()
-                    .map(entity -> {
-                        if (this.freezeEntities) {
-                            var originalEntity = entity;
-                            entity = entity.getType().create(client.world);
+        client.execute(() -> entitiesFuture.complete(this.entitySupplier.apply(client.player, this.origin, this.end.offset(1, 1, 1))
+                .stream()
+                .map(entity -> {
+                    if (this.freezeEntities) {
+                        var originalEntity = entity;
+                        entity = entity.getType().create(client.level);
 
-                            entity.copyFrom(originalEntity);
-                            entity.copyPositionAndRotation(originalEntity);
-                            entity.tick();
-                        }
+                        entity.restoreFrom(originalEntity);
+                        entity.copyPosition(originalEntity);
+                        entity.tick();
+                    }
 
-                        return new DynamicRenderInfo.EntityEntry(
-                                entity,
-                                client.getEntityRenderDispatcher().getLight(entity, 0)
-                        );
-                    }).toList());
-        });
+                    return new DynamicRenderInfo.EntityEntry(
+                            entity,
+                            client.getEntityRenderDispatcher().getPackedLightCoords(entity, 0)
+                    );
+                }).toList()));
 
         var blockEntities = new HashMap<BlockPos, BlockEntity>();
 
         int currentBlockIndex = 0;
-        int blocksToBuild = (this.end.getX() - this.origin.getX() + 1)
-                * (this.end.getY() - this.origin.getY() + 1)
-                * (this.end.getZ() - this.origin.getZ() + 1);
+        int blocksToBuild = (this.end.getX() - this.origin.getX() + 1) * (this.end.getY() - this.origin.getY() + 1) * (this.end.getZ() - this.origin.getZ() + 1);
 
-        for (var pos : BlockPos.iterate(this.origin, this.end)) {
-            currentBlockIndex++;
-            this.buildProgress = currentBlockIndex / (float) blocksToBuild;
+        for (BlockPos pos : BlockPos.betweenClosed(this.origin, this.end)) {
+            ++currentBlockIndex;
+            this.buildProgress = (float) currentBlockIndex / (float) blocksToBuild;
+            BlockState state = this.world.getBlockState(pos);
+            if (!state.isAir()) {
+                BlockPos renderPos = pos.subtract(this.origin);
+                if (this.world.getBlockEntity(pos) != null) {
+                    blockEntities.put(renderPos, this.world.getBlockEntity(pos));
+                }
 
-            var state = world.getBlockState(pos);
-            if (state.isAir()) continue;
+                if (!this.world.getFluidState(pos).isEmpty()) {
+                    FluidState fluidState = this.world.getFluidState(pos);
+                    RenderType fluidLayer = ItemBlockRenderTypes.getRenderLayer(fluidState);
+                    matrices.pushPose();
+                    matrices.translate((float) (-(pos.getX() & 15)), (float) (-(pos.getY() & 15)), (float) (-(pos.getZ() & 15)));
+                    matrices.translate((float) renderPos.getX(), (float) renderPos.getY(), (float) renderPos.getZ());
+                    WorldMesherFluidRenderer.setMatrix(matrices.last().pose());
+                    WorldMesherFluidRenderer.render(this.world, pos, this.getOrCreateBuilder(builderStorage, fluidLayer), state, fluidState);
+                    matrices.popPose();
+                }
 
-            var renderPos = pos.subtract(origin);
-            if (world.getBlockEntity(pos) != null) {
-                blockEntities.put(renderPos, world.getBlockEntity(pos));
+                matrices.pushPose();
+                var blockLayer = ItemBlockRenderTypes.getChunkRenderType(state);
+                matrices.translate((float) renderPos.getX(), (float) renderPos.getY(), (float) renderPos.getZ());
+                boolean alwaysDrawVolumeEdges = !this.useGlobalNeighbors;
+                blockRenderer.clearCullingOverrides();
+                blockRenderer.setCullDirection(Direction.EAST, alwaysDrawVolumeEdges && pos.getX() == this.end.getX());
+                blockRenderer.setCullDirection(Direction.WEST, alwaysDrawVolumeEdges && pos.getX() == this.origin.getX());
+                blockRenderer.setCullDirection(Direction.SOUTH, alwaysDrawVolumeEdges && pos.getZ() == this.end.getZ());
+                blockRenderer.setCullDirection(Direction.NORTH, alwaysDrawVolumeEdges && pos.getZ() == this.origin.getZ());
+                blockRenderer.setCullDirection(Direction.UP, alwaysDrawVolumeEdges && pos.getY() == this.end.getY());
+                blockRenderer.setCullDirection(Direction.DOWN, alwaysDrawVolumeEdges && pos.getY() == this.origin.getY());
+                BakedModel model = blockRenderManager.getBlockModel(state);
+                if (state.getRenderShape() == RenderShape.MODEL) {
+                    blockRenderer.renderModel(matrices.last(), this.getOrCreateBuilder(builderStorage, blockLayer), state, model, 1f, 1f, 1f, LightTexture.FULL_BRIGHT, OverlayTexture.NO_OVERLAY);
+                }
+
+                matrices.popPose();
             }
 
-            if (!world.getFluidState(pos).isEmpty()) {
-                var fluidState = world.getFluidState(pos);
-                var fluidLayer = RenderLayers.getFluidLayer(fluidState);
-
-                matrices.push();
-                matrices.translate(-(pos.getX() & 15), -((pos.getY() & 15)), -((pos.getZ() & 15)));
-                matrices.translate(renderPos.getX(), renderPos.getY(), renderPos.getZ());
-
-                fluidRenderer.setMatrix(matrices.peek().getPositionMatrix());
-                fluidRenderer.render(world, pos, this.getOrCreateBuilder(builderStorage, fluidLayer), state, fluidState);
-
-                matrices.pop();
-            }
-
-            matrices.push();
-            matrices.translate(renderPos.getX(), renderPos.getY(), renderPos.getZ());
-
-            boolean alwaysDrawVolumeEdges = !this.useGlobalNeighbors;
-
-            blockRenderer.clearCullingOverrides();
-            blockRenderer.setCullDirection(Direction.EAST, alwaysDrawVolumeEdges && pos.getX() == this.end.getX());
-            blockRenderer.setCullDirection(Direction.WEST, alwaysDrawVolumeEdges && pos.getX() == this.origin.getX());
-            blockRenderer.setCullDirection(Direction.SOUTH, alwaysDrawVolumeEdges && pos.getZ() == this.end.getZ());
-            blockRenderer.setCullDirection(Direction.NORTH, alwaysDrawVolumeEdges && pos.getZ() == this.origin.getZ());
-            blockRenderer.setCullDirection(Direction.UP, alwaysDrawVolumeEdges && pos.getY() == this.end.getY());
-            blockRenderer.setCullDirection(Direction.DOWN, alwaysDrawVolumeEdges && pos.getY() == this.origin.getY());
-
-            var blockLayer = RenderLayers.getBlockLayer(state);
-
-            final var model = (FabricBakedModel) blockRenderManager.getModel(state);
             if (renderContext != null && !model.isVanillaAdapter()) {
                 renderContext.tessellateBlock(this.world, state, pos, model, matrices);
             } else if (state.getRenderType() == BlockRenderType.MODEL) {
                 blockRenderer.render(this.world, (BakedModel) model, state, pos, matrices, this.getOrCreateBuilder(builderStorage, blockLayer), cull, random, state.getRenderingSeed(pos), OverlayTexture.DEFAULT_UV);
             }
 
-            matrices.pop();
-        }
-
-        if (builderStorage.containsKey(RenderLayer.getTranslucent())) {
-            var translucentBuilder = builderStorage.get(RenderLayer.getTranslucent());
-            var camera = client.gameRenderer.getCamera();
-
-            // TODO this camera position should probably be customizable
-            translucentBuilder.setSorter(VertexSorter.byDistance((float) camera.getPos().x - (float) origin.getX(), (float) camera.getPos().y - (float) origin.getY(), (float) camera.getPos().z - (float) origin.getZ()));
-        }
 
         var future = new CompletableFuture<Void>();
         RenderSystem.recordRenderCall(() -> {
@@ -423,19 +396,19 @@ public class WorldMesh {
         );
     }
 
-    private VertexConsumer getOrCreateBuilder(Map<RenderLayer, BufferBuilder> builderStorage, RenderLayer layer) {
-        return builderStorage.computeIfAbsent(layer, renderLayer -> {
-            var builder = new BufferBuilder(layer.getExpectedBufferSize());
-            builder.begin(VertexFormat.DrawMode.QUADS, VertexFormats.POSITION_COLOR_TEXTURE_LIGHT_NORMAL);
+    private static double distanceToCamera(BakedQuad quad, Vec3 cam) {
+        int[] v = quad.getVertices();
 
-            return builder;
-        });
+        float x = Float.intBitsToFloat(v[0]);
+        float y = Float.intBitsToFloat(v[1]);
+        float z = Float.intBitsToFloat(v[2]);
+
+        return cam.distanceTo(new Vec3(x, y, z));
     }
 
     public static class Builder {
-
-        private final BlockRenderView world;
-        private final TriFunction<PlayerEntity, BlockPos, BlockPos, List<Entity>> entitySupplier;
+        private final BlockAndTintGetter world;
+        private final TriFunction<Player, BlockPos, BlockPos, List<Entity>> entitySupplier;
 
         private final BlockPos origin;
         private final BlockPos end;
@@ -448,26 +421,25 @@ public class WorldMesh {
         private Runnable endAction = () -> {
         };
 
-        @Deprecated(forRemoval = true)
-        public Builder(BlockRenderView world, BlockPos origin, BlockPos end, Function<PlayerEntity, List<Entity>> entitySupplier) {
+        public Builder(BlockAndTintGetter world, BlockPos origin, BlockPos end, Function<Player, List<Entity>> entitySupplier) {
             this.world = world;
             this.origin = origin;
             this.end = end;
             this.entitySupplier = (player, $, $$) -> entitySupplier.apply(player);
         }
 
-        public Builder(BlockRenderView world, BlockPos origin, BlockPos end, TriFunction<PlayerEntity, BlockPos, BlockPos, List<Entity>> entitySupplier) {
+        public Builder(BlockAndTintGetter world, BlockPos origin, BlockPos end, TriFunction<Player, BlockPos, BlockPos, List<Entity>> entitySupplier) {
             this.world = world;
             this.origin = origin;
             this.end = end;
             this.entitySupplier = entitySupplier;
         }
 
-        public Builder(World world, BlockPos origin, BlockPos end) {
-            this(world, origin, end, (except, min, max) -> world.getOtherEntities(except, new Box(min, max), entity -> !(entity instanceof PlayerEntity)));
+        public Builder(Level world, BlockPos origin, BlockPos end) {
+            this(world, origin, end, (except, min, max) -> world.getEntities(except, new AABB(new Vec3(min.getX(), min.getY(), min.getZ()), new Vec3(max.getX(), max.getY(), max.getZ()))));
         }
 
-        public Builder(BlockRenderView world, BlockPos origin, BlockPos end) {
+        public Builder(BlockAndTintGetter world, BlockPos origin, BlockPos end) {
             this(world, origin, end, (except) -> List.of());
         }
 
@@ -515,5 +487,4 @@ public class WorldMesh {
             this.canRender = canRender;
         }
     }
-
-}
+    }

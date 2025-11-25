@@ -1,117 +1,128 @@
 plugins {
-    id "dev.architectury.loom" version "1.3-SNAPSHOT"
-    id "maven-publish"
+    id 'java-library'
+    id 'maven-publish'
+    id 'idea'
+    id 'net.neoforged.moddev' version '2.0.107'
 }
+
+version = mod_version
+group = mod_group_id
 
 base {
-    archivesName = project.archives_base_name
+    archivesName = mod_id
 }
 
-version = project.mod_version
-group = project.maven_group
 
-java {
-    sourceCompatibility = targetCompatibility = JavaVersion.VERSION_17
+tasks.named('wrapper', Wrapper).configure {
+    distributionType = Wrapper.DistributionType.BIN
 }
 
-loom {
-    // use this if you are using the official mojang mappings
-    // and want loom to stop warning you about their license
-    silentMojangMappingsLicense()
+java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
-    // since loom 0.10, you are **required** to use the
-    // "forge" block to configure forge-specific features,
-    // such as the mixinConfigs array or datagen
-    forge {
-        // specify the mixin configs used in this mod
-        // this will be added to the jar manifest as well!
-        mixinConfigs = [
-                "worldmesher.mixins.json"
-        ]
+neoForge {
+    version = project.neo_version
 
-        // missing access transformers?
-        // don't worry, you can still use them!
-        // note that your AT *MUST* be located at
-        accessTransformer("src/main/resources/META-INF/accesstransformer.cfg")
-        // to work as there is currently no config option to change this.
-        // also, any names used in your access transformer will need to be
-        // in SRG mapped ("func_" / "field_" with MCP class names) to work!
-        // (both of these things may be subject to change in the future)
+    accessTransformers.from('src/main/templates/META-INF/accesstransformer.cfg')
+
+    parchment {
+        mappingsVersion = project.parchment_mappings_version
+        minecraftVersion = project.parchment_minecraft_version
     }
-}
 
-repositories {
-    maven {
-        url "https://maven.su5ed.dev/releases"
-    }
-}
+    runs {
+        client {
+            client()
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
 
-dependencies {
-    // to change the versions see the gradle.properties file
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
-    forge "net.minecraftforge:forge:${project.forge_version}"
+        server {
+            server()
+            programArgument '--nogui'
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
 
-    modImplementation ("dev.su5ed.sinytra.fabric-api:fabric-api:0.91.0+1.10.8+1.20.1")
-    include ("dev.su5ed.sinytra.fabric-api:fabric-api:0.91.0+1.10.8+1.20.1")
-}
+        gameTestServer {
+            type = "gameTestServer"
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
 
-processResources {
-    // define properties that can be used during resource processing
-    inputs.property "version", project.version
-    inputs.property("fabric_api_version", project.fabric_version)
+        data {
+            data()
+            programArguments.addAll '--mod', project.mod_id, '--all', '--output', file('src/generated/resources/').getAbsolutePath(), '--existing', file('src/main/resources/').getAbsolutePath()
+        }
 
-    // this will replace the property "${version}" in your mods.toml
-    // with the version you've defined in your gradle.properties
-    filesMatching("META-INF/mods.toml") {
-        expand "version": project.version
-    }
-}
-
-tasks.withType(JavaCompile) {
-    // ensure that the encoding is set to UTF-8, no matter what the system default is
-    // this fixes some edge cases with special characters not displaying correctly
-    // see http://yodaconditions.net/blog/fix-for-java-file-encoding-problems-with-gradle.html
-    // If Javadoc is generated, this must be specified in that task too.
-    options.encoding = "UTF-8"
-    options.release = 17
-}
-
-java {
-    // Loom will automatically attach sourcesJar to a RemapSourcesJar task and to the "build" task
-    // if it is present.
-    // If you remove this line, sources will not be generated.
-    withSourcesJar()
-}
-
-jar {
-    // add some additional metadata to the jar manifest
-    manifest {
-        attributes([
-                "Specification-Title"     : project.mod_id,
-                "Specification-Vendor"    : project.mod_author,
-                "Specification-Version"   : "1",
-                "Implementation-Title"    : project.name,
-                "Implementation-Version"  : version,
-                "Implementation-Vendor"   : project.mod_author,
-                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
-        ])
-    }
-}
-
-// configure the maven publication
-publishing {
-    publications {
-        mavenJava(MavenPublication) {
-            from components.java
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            logLevel = org.slf4j.event.Level.DEBUG
         }
     }
 
-    // See https://docs.gradle.org/current/userguide/publishing_maven.html for information on how to set up publishing.
+    mods {
+        "${mod_id}" {
+            sourceSet(sourceSets.main)
+        }
+    }
+}
+
+sourceSets.main.resources { srcDir 'src/generated/resources' }
+
+configurations {
+    runtimeClasspath.extendsFrom localRuntime
+}
+
+var generateModMetadata = tasks.register("generateModMetadata", ProcessResources) {
+    var replaceProperties = [
+            minecraft_version      : minecraft_version,
+            minecraft_version_range: minecraft_version_range,
+            neo_version            : neo_version,
+            neo_version_range      : neo_version_range,
+            loader_version_range   : loader_version_range,
+            mod_id                 : mod_id,
+            mod_name               : mod_name,
+            mod_license            : mod_license,
+            mod_version            : mod_version,
+            mod_authors            : mod_authors,
+            mod_description        : mod_description
+    ]
+
+    inputs.properties replaceProperties
+
+    from("src/main/templates") {
+        include("META-INF/neoforge.mods.toml")
+        expand replaceProperties
+    }
+
+    from("src/main/templates") {
+        exclude("META-INF/neoforge.mods.toml")
+    }
+
+    into("build/generated/sources/modMetadata")
+}
+
+sourceSets.main.resources.srcDir generateModMetadata
+neoForge.ideSyncTask generateModMetadata
+
+tasks.named("createMinecraftArtifacts") {
+    dependsOn(generateModMetadata)
+}
+
+
+publishing {
+    publications {
+        register('mavenJava', MavenPublication) {
+            from components.java
+        }
+    }
     repositories {
-        // Add repositories to publish to here.
-        // Notice: This block does NOT have the same function as the block in the top level.
-        // The repositories here will be used for publishing your artifact, not for
-        // retrieving dependencies.
+        maven {
+            url "file://${project.projectDir}/repo"
+        }
+    }
+}
+
+idea {
+    module {
+        downloadSources = true
+        downloadJavadoc = true
     }
 }

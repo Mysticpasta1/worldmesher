@@ -1,94 +1,130 @@
 package io.wispforest.worldmesher.renderers;
 
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockState;
-import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.render.RenderLayer;
-import net.minecraft.client.render.VertexConsumer;
-import net.minecraft.client.render.WorldRenderer;
-import net.minecraft.client.render.block.BlockModelRenderer;
-import net.minecraft.client.render.model.BakedModel;
-import net.minecraft.client.render.model.BakedQuad;
-import net.minecraft.client.util.math.MatrixStack;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.util.math.Direction;
-import net.minecraft.util.math.random.Random;
-import net.minecraft.world.BlockRenderView;
-import net.minecraftforge.client.model.data.ModelData;
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.client.renderer.block.ModelBlockRenderer;
+import net.minecraft.client.renderer.block.model.BakedQuad;
+import net.minecraft.client.resources.model.BakedModel;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.util.RandomSource;
+import net.minecraft.world.level.BlockAndTintGetter;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
+import net.neoforged.neoforge.client.model.data.ModelData;
+import org.jetbrains.annotations.NotNull;
 
 import java.util.BitSet;
 import java.util.List;
 
-public class WorldMesherBlockModelRenderer extends BlockModelRenderer {
+public class WorldMesherBlockModelRenderer extends ModelBlockRenderer {
 
-    private static final Direction[] DIRECTIONS = Direction.values();
-    private byte cullingOverrides = 0;
+    private static final Direction[] DIRS = Direction.values();
+    private byte overrides = 0;
 
     public WorldMesherBlockModelRenderer() {
-        super(MinecraftClient.getInstance().getBlockColors());
+        super(Minecraft.getInstance().getBlockColors());
     }
 
-    public void setCullDirection(Direction direction, boolean alwaysDraw) {
-        if (!alwaysDraw) return;
-        cullingOverrides |= (byte) (1 << direction.getId());
+    public static RenderType getLayer(BlockState state, BakedModel model, RandomSource random, ModelData data) {
+        var list = model.getRenderTypes(state, random, data);
+        return list.isEmpty() ? RenderType.solid() : list.asList().getFirst();
+    }
+
+    public void setCullDirection(Direction d, boolean draw) {
+        if (draw) overrides |= (byte)(1 << d.ordinal());
     }
 
     public void clearCullingOverrides() {
-        cullingOverrides = 0;
+        overrides = 0;
     }
 
-    private boolean shouldAlwaysDraw(Direction direction) {
-        return (cullingOverrides & (1 << direction.getId())) != 0;
+    private boolean always(Direction d) {
+        return (overrides & (1 << d.ordinal())) != 0;
     }
 
     @Override
-    public void tesselateWithAO(BlockRenderView world, BakedModel model, BlockState state, BlockPos pos, MatrixStack matrices, VertexConsumer vertexConsumer, boolean cull, Random random, long seed, int overlay, ModelData modelData, RenderLayer renderLayer) {
-        float[] fs = new float[DIRECTIONS.length * 2];
-        BitSet bitSet = new BitSet(3);
-        BlockModelRenderer.AmbientOcclusionCalculator ambientOcclusionCalculator = new BlockModelRenderer.AmbientOcclusionCalculator();
-        BlockPos.Mutable mutable = pos.mutableCopy();
+    public void tesselateWithAO(
+            @NotNull BlockAndTintGetter level,
+            @NotNull BakedModel model,
+            @NotNull BlockState state,
+            @NotNull BlockPos pos,
+            @NotNull PoseStack pose,
+            @NotNull VertexConsumer consumer,
+            boolean checkSides,
+            @NotNull RandomSource random,
+            long seed,
+            int packedOverlay,
+            @NotNull ModelData modelData,
+            @NotNull RenderType renderType
+    ) {
+        float[] shape = new float[DIRECTIONS.length * 2];
+        BitSet shapeFlags = new BitSet(3);
+        ModelBlockRenderer.AmbientOcclusionFace aoFace = new ModelBlockRenderer.AmbientOcclusionFace();
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
 
-        for (Direction direction : DIRECTIONS) {
+        for (Direction d : DIRS) {
             random.setSeed(seed);
-            List<BakedQuad> list = model.getQuads(state, direction, random);
-            if (!list.isEmpty()) {
-                mutable.set(pos, direction);
-                if (!cull || shouldAlwaysDraw(direction) || Block.shouldDrawSide(state, world, pos, direction, mutable)) {
-                    this.renderQuadsSmooth(world, state, !shouldAlwaysDraw(direction) ? pos : pos.add(0, 500, 0), matrices, vertexConsumer, list, fs, bitSet, ambientOcclusionCalculator, overlay);
+            List<BakedQuad> quads = model.getQuads(state, d, random, modelData, renderType);
+            if (!quads.isEmpty()) {
+                m.setWithOffset(pos, d);
+                if (!checkSides || always(d) || Block.shouldRenderFace(state, level, pos, d, m)) {
+                    this.renderModelFaceAO(level, state,
+                            always(d) ? pos.offset(0, 500, 0) : pos,
+                            pose, consumer, quads, shape, shapeFlags, aoFace, packedOverlay);
                 }
             }
         }
 
         random.setSeed(seed);
-        List<BakedQuad> quads = model.getQuads(state, null, random);
-        if (!quads.isEmpty()) {
-            this.renderQuadsSmooth(world, state, pos, matrices, vertexConsumer, quads, fs, bitSet, ambientOcclusionCalculator, overlay);
+        List<BakedQuad> general = model.getQuads(state, null, random, modelData, renderType);
+        if (!general.isEmpty()) {
+            this.renderModelFaceAO(level, state, pos, pose, consumer, general, shape, shapeFlags, aoFace, packedOverlay);
         }
     }
 
     @Override
-    public void tesselateWithoutAO(BlockRenderView world, BakedModel model, BlockState state, BlockPos pos, MatrixStack matrices, VertexConsumer vertexConsumer, boolean cull, Random random, long seed, int overlay, ModelData modelData, RenderLayer renderLayer) {
-        BitSet bitSet = new BitSet(3);
-        BlockPos.Mutable mutable = pos.mutableCopy();
+    public void tesselateWithoutAO(
+            @NotNull BlockAndTintGetter level,
+            @NotNull BakedModel model,
+            @NotNull BlockState state,
+            @NotNull BlockPos pos,
+            @NotNull PoseStack poseStack,
+            @NotNull VertexConsumer consumer,
+            boolean checkSides,
+            @NotNull RandomSource random,
+            long seed,
+            int packedOverlay,
+            @NotNull ModelData modelData,
+            @NotNull RenderType renderType
+    ) {
+        BitSet shapeFlags = new BitSet(3);
+        BlockPos.MutableBlockPos m = new BlockPos.MutableBlockPos();
 
-        for (Direction direction : DIRECTIONS) {
+        for (Direction d : DIRS) {
             random.setSeed(seed);
-            List<BakedQuad> list = model.getQuads(state, direction, random);
-            if (!list.isEmpty()) {
-                mutable.set(pos, direction);
-                if (!cull || shouldAlwaysDraw(direction) || Block.shouldDrawSide(state, world, pos, direction, mutable)) {
-                    int i = WorldRenderer.getLightmapCoordinates(world, state, mutable);
-                    this.renderQuadsFlat(world, state, !shouldAlwaysDraw(direction) ? pos : pos.add(0, 500, 0), i, overlay, false, matrices, vertexConsumer, list, bitSet);
+            List<BakedQuad> quads = model.getQuads(state, d, random, modelData, renderType);
+            if (!quads.isEmpty()) {
+                m.setWithOffset(pos, d);
+                if (!checkSides || always(d) || Block.shouldRenderFace(state, level, pos, d, m)) {
+                    int light = LevelRenderer.getLightColor(level, state, m);
+                    this.renderModelFaceFlat(level, state,
+                            always(d) ? pos.offset(0, 500, 0) : pos,
+                            light, packedOverlay, false,
+                            poseStack, consumer, quads, shapeFlags);
                 }
             }
         }
 
         random.setSeed(seed);
-        List<BakedQuad> list2 = model.getQuads(state, null, random);
-        if (!list2.isEmpty()) {
-            this.renderQuadsFlat(world, state, pos, -1, overlay, true, matrices, vertexConsumer, list2, bitSet);
+        List<BakedQuad> general = model.getQuads(state, null, random, modelData, renderType);
+        if (!general.isEmpty()) {
+            this.renderModelFaceFlat(level, state, pos,
+                    -1, packedOverlay, true,
+                    poseStack, consumer, general, shapeFlags);
         }
-
     }
-
 }
