@@ -29,11 +29,6 @@ public class WorldMesherBlockModelRenderer extends ModelBlockRenderer {
         super(Minecraft.getInstance().getBlockColors());
     }
 
-    public static RenderType getLayer(BlockState state, BakedModel model, RandomSource random, ModelData data) {
-        var list = model.getRenderTypes(state, random, data);
-        return list.isEmpty() ? RenderType.solid() : list.asList().getFirst();
-    }
-
     public void setCullDirection(Direction d, boolean draw) {
         if (draw) overrides |= (byte)(1 << d.ordinal());
     }
